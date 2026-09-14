@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 .env
 .env.*
+!.env.example
 data/*.db
+data/*.db-journal
+data/*.db-wal
 logs/
 browser-profile/
+screenshots/
