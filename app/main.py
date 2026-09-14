@@ -2,10 +2,13 @@
 
 import argparse
 import sys
+import uuid
 from dataclasses import replace
 
 from app import __version__
 from app.config import Config, ConfigError
+from app.logger import setup_logger
+from app.lifecycle import AppLifecycle, RunPhase
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +32,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     """Main entry point. Returns exit code (0 = success, 1 = error)."""
+    # 1. Generate unique run ID
+    run_id = uuid.uuid4().hex
+
     args = parse_args()
 
     # Load and validate configuration
@@ -42,17 +48,31 @@ def main() -> int:
     if args.dry_run:
         config = replace(config, dry_run=True)
 
-    # Phase 1: Basic startup confirmation
-    # (Logging, database, browser, and orchestration added in later phases)
-    print(f"AWS Builder Automation v{__version__}")
-    print(f"DRY_RUN: {config.dry_run}")
-    print(f"Timezone: {config.timezone}")
-    print(f"Builder Center: {config.builder_center_url}")
-    print(f"Database: {config.database_path}")
-    print(f"Log level: {config.log_level}")
-    print("Configuration loaded successfully.")
+    # 2. Setup logger
+    logger = setup_logger(config, run_id)
+    
+    # 3. Setup lifecycle state machine
+    lifecycle = AppLifecycle(run_id, logger)
 
-    return 0
+    try:
+        lifecycle.transition(RunPhase.INITIALIZATION)
+        
+        logger.info(f"AWS Builder Automation v{__version__} starting")
+        logger.info(f"Run ID: {run_id}")
+        logger.info(f"DRY_RUN: {config.dry_run}")
+        logger.info(f"Timezone: {config.timezone}")
+        logger.info(f"Builder Center: {config.builder_center_url}")
+        logger.info(f"Database: {config.database_path}")
+        logger.info("Configuration loaded successfully.")
+
+        lifecycle.transition(RunPhase.COMPLETED)
+        logger.info("Application finished successfully.")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Unexpected application error: {e}", exc_info=True)
+        lifecycle.transition(RunPhase.FAILED)
+        return 1
 
 
 if __name__ == "__main__":
