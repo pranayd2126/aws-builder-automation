@@ -124,6 +124,32 @@ class TestDryRun:
             _load_with_env({"DRY_RUN": "maybe"})
 
 
+class TestBrowserHeadless:
+
+    def test_defaults_to_true(self):
+        config = _load_with_env()
+        assert config.browser_headless is True
+
+    def test_explicit_true(self):
+        assert _load_with_env({"BROWSER_HEADLESS": "true"}).browser_headless is True
+
+    def test_explicit_false(self):
+        assert _load_with_env({"BROWSER_HEADLESS": "false"}).browser_headless is False
+
+    def test_accepts_0(self):
+        assert _load_with_env({"BROWSER_HEADLESS": "0"}).browser_headless is False
+
+    def test_accepts_1(self):
+        assert _load_with_env({"BROWSER_HEADLESS": "1"}).browser_headless is True
+
+    def test_case_insensitive(self):
+        assert _load_with_env({"BROWSER_HEADLESS": "FALSE"}).browser_headless is False
+
+    def test_invalid_value_raises(self):
+        with pytest.raises(ConfigError, match="BROWSER_HEADLESS"):
+            _load_with_env({"BROWSER_HEADLESS": "maybe"})
+
+
 # ---------------------------------------------------------------------------
 # Default values
 # ---------------------------------------------------------------------------

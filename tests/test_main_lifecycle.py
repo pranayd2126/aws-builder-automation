@@ -7,6 +7,8 @@ from app.main import main
 from app.lifecycle import AppLifecycle, RunPhase
 
 
+from app.browser import AuthState
+
 def test_independent_run_ids(monkeypatch):
     """Test that repeated runs generate independent run IDs."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "dummy")
@@ -14,18 +16,20 @@ def test_independent_run_ids(monkeypatch):
     
     run_ids = set()
     
-    # We will mock uuid4 to track generated IDs
-    # But it's easier to mock setup_logger and capture the run_id passed to it
-    
     with patch("app.main.setup_logger") as mock_setup_logger:
         mock_setup_logger.return_value = MagicMock()
         
-        # Run main twice
-        with patch.object(sys, "argv", ["main.py", "--dry-run"]):
-            assert main() == 0
+        with patch("app.main.BrowserManager") as mock_bm:
+            mock_bm.return_value.check_session.return_value = AuthState.AVAILABLE
+            mock_bm.return_value.session.return_value.__enter__ = MagicMock()
+            mock_bm.return_value.session.return_value.__exit__ = MagicMock()
             
-        with patch.object(sys, "argv", ["main.py", "--dry-run"]):
-            assert main() == 0
+            # Run main twice
+            with patch.object(sys, "argv", ["main.py", "--dry-run"]):
+                assert main() == 0
+                
+            with patch.object(sys, "argv", ["main.py", "--dry-run"]):
+                assert main() == 0
             
         assert mock_setup_logger.call_count == 2
         run_ids.add(mock_setup_logger.call_args_list[0][0][1])
@@ -41,10 +45,15 @@ def test_main_unexpected_exception_handling(monkeypatch):
     
     # Force an exception during the second transition (COMPLETED)
     with patch("app.main.AppLifecycle.transition") as mock_transition:
-        mock_transition.side_effect = [None, RuntimeError("Boom"), None]
+        mock_transition.side_effect = [None, None, None, RuntimeError("Boom"), None]
         
-        with patch.object(sys, "argv", ["main.py"]):
-            exit_code = main()
+        with patch("app.main.BrowserManager") as mock_bm:
+            mock_bm.return_value.check_session.return_value = AuthState.AVAILABLE
+            mock_bm.return_value.session.return_value.__enter__ = MagicMock()
+            mock_bm.return_value.session.return_value.__exit__ = MagicMock(return_value=False)
+            
+            with patch.object(sys, "argv", ["main.py"]):
+                exit_code = main()
             
         assert exit_code == 1
         assert mock_transition.call_args_list[-1][0][0] == RunPhase.FAILED
@@ -62,8 +71,13 @@ def test_main_unexpected_exception_clean(monkeypatch):
         original_transition(self, phase)
 
     with patch("app.main.AppLifecycle.transition", new=buggy_transition):
-        with patch.object(sys, "argv", ["main.py"]):
-            exit_code = main()
+        with patch("app.main.BrowserManager") as mock_bm:
+            mock_bm.return_value.check_session.return_value = AuthState.AVAILABLE
+            mock_bm.return_value.session.return_value.__enter__ = MagicMock()
+            mock_bm.return_value.session.return_value.__exit__ = MagicMock(return_value=False)
+            
+            with patch.object(sys, "argv", ["main.py"]):
+                exit_code = main()
             
     assert exit_code == 1
 

@@ -26,6 +26,7 @@ class Config:
 
     # Operational
     dry_run: bool = True
+    browser_headless: bool = True
     builder_center_url: str = "https://builder.aws.com"
     timezone: str = "Asia/Kolkata"
 
@@ -85,6 +86,16 @@ class Config:
         else:
             errors.append(f"DRY_RUN must be true/false, got: {dry_run_raw!r}")
             dry_run = True
+
+        # --- BROWSER_HEADLESS: default True ---
+        browser_headless_raw = os.environ.get("BROWSER_HEADLESS", "true").strip().lower()
+        if browser_headless_raw in ("", "true", "1", "yes"):
+            browser_headless = True
+        elif browser_headless_raw in ("false", "0", "no"):
+            browser_headless = False
+        else:
+            errors.append(f"BROWSER_HEADLESS must be true/false, got: {browser_headless_raw!r}")
+            browser_headless = True
 
         # --- Optional string fields ---
         builder_center_url = os.environ.get(
@@ -148,6 +159,7 @@ class Config:
             telegram_bot_token=telegram_bot_token,
             telegram_chat_id=telegram_chat_id,
             dry_run=dry_run,
+            browser_headless=browser_headless,
             builder_center_url=builder_center_url,
             database_path=database_path,
             browser_profile_path=browser_profile_path,
