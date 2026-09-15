@@ -47,11 +47,11 @@ class BrowserManager:
                 ignore_default_args=["--enable-automation"],
                 viewport={"width": 1280, "height": 720},
             )
-            
+
             # Set default timeouts
             self._context.set_default_timeout(self.config.selector_timeout_ms)
             self._context.set_default_navigation_timeout(self.config.page_timeout_ms)
-            
+
             # Usually launch_persistent_context provides a default page
             if self._context.pages:
                 self._page = self._context.pages[0]
@@ -94,6 +94,51 @@ class BrowserManager:
         finally:
             self.stop()
 
+    def _is_authenticated_passively(self) -> bool:
+        """
+        Passively analyze the current DOM for authenticated state signals.
+        Returns True if authenticated, False if unauthenticated or uncertain.
+        """
+        if not self._page:
+            return False
+
+        try:
+            current_url = self._page.url.lower()
+            # 1. Obvious sign-in pages mean not authenticated
+            if "signin" in current_url or "login" in current_url:
+                return False
+
+            # 2. Check for explicit unauthenticated signals (visible)
+            # Use small timeouts for these negative checks so we don't stall.
+            if self._page.get_by_text("Sign In", exact=False).first.is_visible(timeout=500):
+                return False
+            if self._page.get_by_text("Log In", exact=False).first.is_visible(timeout=500):
+                return False
+        except PlaywrightError:
+            pass
+
+        # 3. Look for positive indicators of authentication.
+        # These can be hidden in dropdowns, so we check if they are in the DOM at all (count > 0).
+        try:
+            positive_indicators = [
+                self._page.get_by_text("Sign Out", exact=False).first,
+                self._page.get_by_text("Log Out", exact=False).first,
+                self._page.get_by_text("Write a post", exact=False).first,
+                self._page.locator('img[alt*="profile" i]').first,
+                self._page.locator('img[alt*="avatar" i]').first,
+                self._page.locator('[aria-label*="profile" i]').first,
+                self._page.locator('[aria-label*="account" i]').first,
+                self._page.locator('[aria-label*="user menu" i]').first,
+            ]
+
+            for indicator in positive_indicators:
+                if indicator.count() > 0:
+                    return True
+        except PlaywrightError:
+            pass
+
+        return False
+
     def check_session(self) -> AuthState:
         """
         Navigates to the builder center URL and conservatively checks authentication state.
@@ -106,7 +151,7 @@ class BrowserManager:
         try:
             self.logger.info(f"Navigating to {self.config.builder_center_url} to check session...")
             response = self._page.goto(self.config.builder_center_url)
-            
+
             if not response:
                 self.logger.error("Navigation failed (no response).")
                 return AuthState.FAILED
@@ -114,42 +159,12 @@ class BrowserManager:
             # Wait for the network to be idle to ensure redirects complete
             self._page.wait_for_load_state("networkidle", timeout=self.config.page_timeout_ms)
 
-            current_url = self._page.url
-            self.logger.info(f"Current URL after navigation: {current_url}")
+            self.logger.info(f"Current URL after navigation: {self._page.url}")
 
-            # Conservative check:
-            # If we were redirected to a sign-in or login page, auth is required.
-            if "signin" in current_url.lower() or "login" in current_url.lower():
-                self.logger.info("Redirected to a login page. Authentication is required.")
-                return AuthState.REQUIRED
+            if self._is_authenticated_passively():
+                self.logger.info("Authentication is available.")
+                return AuthState.AVAILABLE
 
-            # Alternatively, if there is a 'Sign In' or 'Log In' link explicitly visible on the page.
-            # Use case-insensitive regex locators to handle any casing variant.
-            try:
-                # We use a short timeout because if it's not there, we shouldn't wait long.
-                sign_in_locator = self._page.get_by_text("Sign In", exact=False).first
-                if sign_in_locator.is_visible(timeout=3000):
-                    self.logger.info("Found 'Sign In' text on page. Authentication is required.")
-                    return AuthState.REQUIRED
-                
-                log_in_locator = self._page.get_by_text("Log In", exact=False).first
-                if log_in_locator.is_visible(timeout=1000):
-                    self.logger.info("Found 'Log In' text on page. Authentication is required.")
-                    return AuthState.REQUIRED
-            except PlaywrightError:
-                pass # Timeout or other error while looking for the text
-
-            # To claim success safely, we need a verifiable signal.
-            # Check for a 'Sign Out' element as positive proof of an authenticated session.
-            try:
-                sign_out_locator = self._page.get_by_text("Sign Out", exact=False).first
-                if sign_out_locator.is_visible(timeout=3000):
-                    self.logger.info("Found 'Sign Out' text on page. Authentication is available.")
-                    return AuthState.AVAILABLE
-            except PlaywrightError:
-                pass
-
-            # If we can't definitively prove either, we return REQUIRED to be safe.
             self.logger.warning("Could not definitively verify authentication state. Assuming REQUIRED for safety.")
             return AuthState.REQUIRED
 
@@ -163,8 +178,8 @@ class BrowserManager:
     def wait_for_manual_login(self, timeout_ms: int = 300000) -> bool:
         """
         Wait for the user to manually log in via the browser UI.
-        This polls the page state waiting for 'Sign Out' to become visible,
-        indicating a successful login.
+        This passively polls the page state without navigating, waiting for positive
+        authentication signals to appear in the DOM.
 
         Args:
             timeout_ms: Maximum time to wait in milliseconds (default 5 minutes).
@@ -179,11 +194,23 @@ class BrowserManager:
             "Waiting up to 5 minutes for manual Google authentication. "
             "Please log in using the opened browser window..."
         )
-        try:
-            sign_out_locator = self._page.get_by_text("Sign Out", exact=False).first
-            sign_out_locator.wait_for(state="visible", timeout=timeout_ms)
-            self.logger.info("Manual authentication detected successfully!")
-            return True
-        except PlaywrightError:
-            self.logger.warning("Timeout or error waiting for manual authentication.")
-            return False
+
+        import time
+        start_time = time.time()
+        timeout_s = timeout_ms / 1000.0
+
+        while time.time() - start_time < timeout_s:
+            try:
+                # Ensure the page hasn't crashed and is not just a blank tab
+                if self._page.url != "about:blank":
+                    if self._is_authenticated_passively():
+                        self.logger.info("Manual authentication detected successfully!")
+                        return True
+            except PlaywrightError:
+                pass
+
+            # Wait briefly before checking again to avoid CPU spin
+            self._page.wait_for_timeout(2000)
+
+        self.logger.warning("Timeout or error waiting for manual authentication.")
+        return False

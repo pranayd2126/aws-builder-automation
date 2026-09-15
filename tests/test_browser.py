@@ -78,6 +78,7 @@ def test_authentication_required_due_to_sign_in_text(test_config, logger):
                 m.is_visible.return_value = True
             else:
                 m.is_visible.return_value = False
+                m.count.return_value = 0
             return m
 
         manager._page.get_by_text.side_effect = get_by_text_side_effect
@@ -87,7 +88,7 @@ def test_authentication_required_due_to_sign_in_text(test_config, logger):
 
 
 def test_authentication_available_due_to_sign_out_text(test_config, logger):
-    """Test AuthState.AVAILABLE is returned when 'Sign Out' text is present."""
+    """Test AuthState.AVAILABLE is returned when a positive indicator is present."""
     manager = BrowserManager(test_config, logger)
     with patch.object(manager, 'start'), patch.object(manager, 'stop'):
         manager._page = MagicMock()
@@ -97,13 +98,22 @@ def test_authentication_available_due_to_sign_out_text(test_config, logger):
         def get_by_text_side_effect(text, **kwargs):
             m = MagicMock()
             m.first = m
+            m.is_visible.return_value = False
+            # Return count > 0 for Sign Out
             if text == "Sign Out":
-                m.is_visible.return_value = True
+                m.count.return_value = 1
             else:
-                m.is_visible.return_value = False
+                m.count.return_value = 0
+            return m
+
+        def locator_side_effect(selector, **kwargs):
+            m = MagicMock()
+            m.first = m
+            m.count.return_value = 0
             return m
 
         manager._page.get_by_text.side_effect = get_by_text_side_effect
+        manager._page.locator.side_effect = locator_side_effect
 
         state = manager.check_session()
         assert state == AuthState.AVAILABLE
@@ -156,30 +166,28 @@ def test_closed_page_handled_safely(test_config, logger):
 
 
 def test_wait_for_manual_login_success(test_config, logger):
-    """Test wait_for_manual_login returns True on success."""
+    """Test wait_for_manual_login returns True on success via passive checking."""
     manager = BrowserManager(test_config, logger)
     manager._page = MagicMock()
+    manager._page.url = "http://example.com"
 
-    # Mock locator to return successfully
-    mock_locator = MagicMock()
-    manager._page.get_by_text.return_value.first = mock_locator
+    # Mock _is_authenticated_passively to return True immediately
+    with patch.object(manager, '_is_authenticated_passively', return_value=True):
+        result = manager.wait_for_manual_login(timeout_ms=100)
 
-    result = manager.wait_for_manual_login(timeout_ms=10)
     assert result is True
-    mock_locator.wait_for.assert_called_once_with(state="visible", timeout=10)
 
 
 def test_wait_for_manual_login_timeout(test_config, logger):
     """Test wait_for_manual_login returns False on timeout."""
     manager = BrowserManager(test_config, logger)
     manager._page = MagicMock()
+    manager._page.url = "http://example.com"
 
-    # Mock locator to raise PlaywrightError
-    mock_locator = MagicMock()
-    mock_locator.wait_for.side_effect = PlaywrightError("Timeout")
-    manager._page.get_by_text.return_value.first = mock_locator
+    # Fast timeout, always returns False
+    with patch.object(manager, '_is_authenticated_passively', return_value=False):
+        result = manager.wait_for_manual_login(timeout_ms=1)
 
-    result = manager.wait_for_manual_login(timeout_ms=10)
     assert result is False
 
 
