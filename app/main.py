@@ -47,8 +47,9 @@ def main() -> int:
     args = parse_args()
 
     # Load and validate configuration
+    is_setup = getattr(args, "setup", False)
     try:
-        config = Config.load()
+        config = Config.load(is_setup=is_setup)
     except ConfigError as e:
         print(f"Configuration error:\n{e}", file=sys.stderr)
         return 1

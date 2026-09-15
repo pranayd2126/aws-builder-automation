@@ -47,13 +47,17 @@ class Config:
     action_delay_max_s: float = 5.0
 
     @classmethod
-    def load(cls, env_path: str | None = None) -> "Config":
+    def load(
+        cls, env_path: str | None = None, is_setup: bool = False
+    ) -> "Config":
         """Load configuration from environment variables.
 
         Reads a .env file first (if present), then validates all settings.
 
         Args:
             env_path: Optional explicit path to .env file.
+            is_setup: If True, bypasses validation for normal operational secrets
+                      (like Telegram credentials) since setup is manual.
 
         Returns:
             Validated, immutable Config instance.
@@ -68,14 +72,15 @@ class Config:
 
         errors: list[str] = []
 
-        # --- Required fields ---
+        # --- Required fields (unless in setup mode) ---
         telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-        if not telegram_bot_token:
-            errors.append("TELEGRAM_BOT_TOKEN is required")
-
         telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-        if not telegram_chat_id:
-            errors.append("TELEGRAM_CHAT_ID is required")
+
+        if not is_setup:
+            if not telegram_bot_token:
+                errors.append("TELEGRAM_BOT_TOKEN is required")
+            if not telegram_chat_id:
+                errors.append("TELEGRAM_CHAT_ID is required")
 
         # --- DRY_RUN: default True (safe) ---
         dry_run_raw = os.environ.get("DRY_RUN", "true").strip().lower()

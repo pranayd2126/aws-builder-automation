@@ -55,11 +55,20 @@ class TestRequiredFields:
                     Config.load()
 
     def test_missing_telegram_chat_id(self):
-        env = {"TELEGRAM_BOT_TOKEN": "tok"}
+        err = _load_with_env_expecting_error({"TELEGRAM_CHAT_ID": ""})
+        assert "TELEGRAM_CHAT_ID is required" in str(err)
+
+    def test_missing_telegram_vars_allowed_in_setup_mode(self):
+        """Test that missing required fields are allowed when is_setup=True."""
+        env = {
+            "TELEGRAM_BOT_TOKEN": "",
+            "TELEGRAM_CHAT_ID": "",
+        }
         with patch("app.config.load_dotenv"):
             with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ConfigError, match="TELEGRAM_CHAT_ID"):
-                    Config.load()
+                config = Config.load(is_setup=True)
+                assert config.telegram_bot_token == ""
+                assert config.telegram_chat_id == ""
 
     def test_missing_both_required_reports_both(self):
         with patch("app.config.load_dotenv"):
