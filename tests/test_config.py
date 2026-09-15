@@ -325,7 +325,12 @@ class TestWhitespace:
 
 class TestApprovedComments:
 
-    def test_approved_comments_is_empty_list(self):
-        """Comments will be supplied before Phase 8."""
-        assert APPROVED_COMMENTS == []
+    def test_approved_comments_is_exact_strings(self):
+        """Test that APPROVED_COMMENTS contains exactly the configured 5 strings."""
+        assert len(APPROVED_COMMENTS) == 5
+        assert "Great practical walkthrough. The implementation details make this especially useful." in APPROVED_COMMENTS
+        assert "Nice explanation of the approach and the trade-offs involved." in APPROVED_COMMENTS
+        assert "This is a helpful example of putting the AWS service into practice." in APPROVED_COMMENTS
+        assert "Really useful breakdown, especially the implementation details." in APPROVED_COMMENTS
+        assert "Good practical write-up. The step-by-step approach makes it easy to follow." in APPROVED_COMMENTS
         assert isinstance(APPROVED_COMMENTS, list)

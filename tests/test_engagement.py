@@ -935,9 +935,9 @@ class TestNoApprovedComments:
         db.record_run_start(run_id, is_dry_run=False)
         eng = ArticleEngagement(test_config, db, run_id, logger)
 
-        # APPROVED_COMMENTS is already empty by default
-        page = _make_mock_page()
-        result = eng.engage(page, valid_article)
+        with patch("app.engagement.APPROVED_COMMENTS", []):
+            page = _make_mock_page()
+            result = eng.engage(page, valid_article)
 
         assert result.status == EngagementStatus.FAILED
         assert "No approved comments configured" in result.error

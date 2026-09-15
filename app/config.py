@@ -9,8 +9,13 @@ from dotenv import load_dotenv
 # Approved comments — to be supplied before Phase 8.
 # Each comment is used exactly as written. Never modified at runtime.
 # DO NOT generate, paraphrase, or alter these at runtime.
-APPROVED_COMMENTS: list[str] = []
-
+APPROVED_COMMENTS: list[str] = [
+    "Great practical walkthrough. The implementation details make this especially useful.",
+    "Nice explanation of the approach and the trade-offs involved.",
+    "This is a helpful example of putting the AWS service into practice.",
+    "Really useful breakdown, especially the implementation details.",
+    "Good practical write-up. The step-by-step approach makes it easy to follow.",
+]
 
 class ConfigError(Exception):
     """Raised when configuration is invalid."""
