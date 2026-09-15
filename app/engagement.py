@@ -57,7 +57,8 @@ class ArticleEngagement:
         'textarea[name="comment"], '
         'textarea[placeholder*="comment" i], '
         '[contenteditable="true"][aria-label*="comment" i], '
-        'textarea[aria-label*="comment" i]'
+        'textarea[aria-label*="comment" i], '
+        '[contenteditable="true"][aria-label="Rich text editor"]'
     )
     COMMENT_SUBMIT_SELECTOR = (
         'button[type="submit"]:has-text("Post"), '
@@ -213,13 +214,12 @@ class ArticleEngagement:
         # Step 9: Determine overall result
         if comment_result == "DRY_RUN" or like_result == "DRY_RUN":
             overall_status = EngagementStatus.DRY_RUN
-        elif comment_result == "SUCCESS" or like_result == "SUCCESS":
-            overall_status = EngagementStatus.SUCCESS
-        elif comment_result == "FAILED" and like_result == "FAILED":
-            overall_status = EngagementStatus.FAILED
         else:
-            # At least one action succeeded or was already present
-            overall_status = EngagementStatus.SUCCESS
+            # Both actions must succeed (or be successfully idempotent) for overall SUCCESS.
+            if comment_result in ("FAILED", "NOT_FOUND") or like_result in ("FAILED", "NOT_FOUND"):
+                overall_status = EngagementStatus.FAILED
+            else:
+                overall_status = EngagementStatus.SUCCESS
 
         self.logger.info(
             f"Engagement completed: status={overall_status.value}, "
@@ -283,7 +283,7 @@ class ArticleEngagement:
             # Add a natural delay before typing
             self._action_delay()
 
-            # Find and click submit
+            # Verify submit button exists and is visible before typing
             submit_button = page.query_selector(self.COMMENT_SUBMIT_SELECTOR)
             if not submit_button:
                 self.logger.warning("Comment submit button not found.")
@@ -294,11 +294,8 @@ class ArticleEngagement:
                 self.logger.warning("Comment submit button is not visible.")
                 self._record_comment_result("FAILED", "Submit button not visible")
                 return "FAILED"
-
-            if not submit_button.is_enabled():
-                self.logger.warning("Comment submit button is disabled.")
-                self._record_comment_result("FAILED", "Submit button disabled")
-                return "FAILED"
+            # We intentionally DO NOT check is_enabled() here because Builder Center
+            # keeps the submit button disabled while the editor is empty.
 
             if self.config.dry_run:
                 self.logger.info("DRY_RUN: Comment inputs verified. Skipping actual typing and submission.")
@@ -310,6 +307,13 @@ class ArticleEngagement:
 
             # Add delay before submitting
             self._action_delay()
+
+            # Re-query the submit button in case the DOM re-rendered after typing
+            submit_button = page.query_selector(self.COMMENT_SUBMIT_SELECTOR)
+            if not submit_button or not submit_button.is_enabled():
+                self.logger.warning("Comment submit button is missing or disabled after typing.")
+                self._record_comment_result("FAILED", "Submit button disabled after typing")
+                return "FAILED"
             
             submit_button.click()
             self.logger.info("Comment submitted.")

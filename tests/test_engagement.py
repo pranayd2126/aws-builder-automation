@@ -730,8 +730,9 @@ class TestMainLifecycleIntegration:
                     with patch("app.main.ArticleEngagement") as mock_eng:
                         mock_eng.return_value.engage.return_value = mock_eng_result
 
-                        with patch.object(sys, "argv", ["main.py", "--dry-run"]):
-                            exit_code = main()
+                        with patch("app.main.DatabaseManager") as mock_db:
+                            with patch.object(sys, "argv", ["main.py", "--dry-run"]):
+                                exit_code = main()
 
         assert exit_code == 0
 
@@ -750,10 +751,7 @@ class TestMainLifecycleIntegration:
             title="Test",
         )
 
-        mock_eng_result = EngagementResult(
-            status=EngagementStatus.FAILED,
-            error="Navigation failed"
-        )
+        mock_eng_result = EngagementResult(status=EngagementStatus.FAILED, error="Some error")
 
         with patch("app.main.setup_logger") as mock_logger:
             mock_logger.return_value = MagicMock()
@@ -767,8 +765,9 @@ class TestMainLifecycleIntegration:
                     with patch("app.main.ArticleEngagement") as mock_eng:
                         mock_eng.return_value.engage.return_value = mock_eng_result
 
-                        with patch.object(sys, "argv", ["main.py", "--dry-run"]):
-                            exit_code = main()
+                        with patch("app.main.DatabaseManager") as mock_db:
+                            with patch.object(sys, "argv", ["main.py", "--dry-run"]):
+                                exit_code = main()
 
         assert exit_code == 1
 
@@ -961,3 +960,141 @@ class TestEngagementStatusEnum:
         assert EngagementStatus.DRY_RUN == "DRY_RUN"
         assert EngagementStatus.AUTHENTICATION_REQUIRED == "AUTHENTICATION_REQUIRED"
         assert EngagementStatus.FAILED == "FAILED"
+
+class TestIncompleteEngagementStatus:
+
+    def test_comment_failed_like_success_returns_failed(self, test_config, db, run_id, logger, valid_article):
+        """Test that if comment fails but like succeeds, overall status is FAILED."""
+        engagement = ArticleEngagement(test_config, db, run_id, logger)
+        page = MagicMock()
+        page.url = valid_article.url
+
+        # Force comment failure, like success
+        with patch.object(engagement, "_perform_comment", return_value="FAILED"), \
+             patch.object(engagement, "_perform_like", return_value="SUCCESS"):
+            result = engagement.engage(page, valid_article)
+
+        assert result.status == EngagementStatus.FAILED
+        assert result.comment_status == "FAILED"
+        assert result.like_status == "SUCCESS"
+
+    def test_comment_not_found_like_success_returns_failed(self, test_config, db, run_id, logger, valid_article):
+        """Test that if comment is not found but like succeeds, overall status is FAILED."""
+        engagement = ArticleEngagement(test_config, db, run_id, logger)
+        page = MagicMock()
+        page.url = valid_article.url
+
+        with patch.object(engagement, "_perform_comment", return_value="NOT_FOUND"), \
+             patch.object(engagement, "_perform_like", return_value="SUCCESS"):
+            result = engagement.engage(page, valid_article)
+
+        assert result.status == EngagementStatus.FAILED
+
+    def test_comment_success_like_failed_returns_failed(self, test_config, db, run_id, logger, valid_article):
+        """Test that if comment succeeds but like fails, overall status is FAILED."""
+        engagement = ArticleEngagement(test_config, db, run_id, logger)
+        page = MagicMock()
+        page.url = valid_article.url
+
+        with patch.object(engagement, "_perform_comment", return_value="SUCCESS"), \
+             patch.object(engagement, "_perform_like", return_value="FAILED"):
+            result = engagement.engage(page, valid_article)
+
+        assert result.status == EngagementStatus.FAILED
+
+
+class TestCommentSelector:
+    def test_comment_selector_includes_rich_text_editor(self):
+        """Test that the comment input selector includes the rich text editor."""
+        assert '[contenteditable="true"][aria-label="Rich text editor"]' in ArticleEngagement.COMMENT_INPUT_SELECTOR
+
+class TestMainRecordRunStart:
+    def test_record_run_start_is_called(self, monkeypatch):
+        """Test that main() calls db.record_run_start immediately after init_db()."""
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "dummy")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "dummy")
+        from app.main import main
+
+        with patch("app.main.DatabaseManager") as mock_db_class, \
+             patch("app.main.setup_logger"), \
+             patch("app.main.BrowserManager"), \
+             patch("app.main.ArticleDiscovery"), \
+             patch("app.main.ArticleEngagement"), \
+             patch.object(sys, "argv", ["main.py", "--dry-run"]):
+
+            mock_db_instance = mock_db_class.return_value
+            main()
+
+            mock_db_instance.init_db.assert_called_once()
+            mock_db_instance.record_run_start.assert_called_once()
+
+            # verify order: init_db then record_run_start
+            method_calls = [call[0] for call in mock_db_instance.mock_calls]
+            init_idx = method_calls.index("init_db")
+            record_idx = method_calls.index("record_run_start")
+            assert record_idx > init_idx
+
+class TestCommentSubmitLogic:
+    def test_disabled_submit_before_typing_ignored(self, test_config, db, run_id, logger, valid_article):
+        """Test disabled Submit before typing does NOT cause premature failure, and enabled Submit after typing proceeds."""
+        from app.engagement import ArticleEngagement
+        engagement = ArticleEngagement(test_config, db, run_id, logger)
+        page = MagicMock()
+        page.url = valid_article.url
+
+        # Mocks
+        comment_input = MagicMock()
+        comment_input.is_visible.return_value = True
+        comment_input.is_enabled.return_value = True
+
+        submit_button_before = MagicMock()
+        submit_button_before.is_visible.return_value = True
+        submit_button_before.is_enabled.return_value = False # Disabled before typing
+
+        submit_button_after = MagicMock()
+        submit_button_after.is_enabled.return_value = True # Enabled after typing
+
+        # Simulate query_selector sequence
+        # Call 1: comment_input
+        # Call 2: submit_button before typing
+        # Call 3: submit_button after typing
+        def query_side_effect(selector):
+            if selector == engagement.COMMENT_INPUT_SELECTOR:
+                return comment_input
+            elif selector == engagement.COMMENT_SUBMIT_SELECTOR:
+                # Return 'before' if input hasn't been filled yet, 'after' if it has
+                return submit_button_after if comment_input.fill.called else submit_button_before
+            return None
+
+        page.query_selector.side_effect = query_side_effect
+
+        res = engagement._perform_comment(page, "Test comment")
+        assert res == "SUCCESS"
+        assert comment_input.fill.called
+        assert submit_button_after.click.called
+
+    def test_disabled_submit_after_typing_fails(self, test_config, db, run_id, logger, valid_article):
+        """Test disabled Submit after typing results in FAILED."""
+        from app.engagement import ArticleEngagement
+        engagement = ArticleEngagement(test_config, db, run_id, logger)
+        page = MagicMock()
+        page.url = valid_article.url
+
+        comment_input = MagicMock()
+        submit_button = MagicMock()
+        submit_button.is_visible.return_value = True
+        submit_button.is_enabled.return_value = False # Still disabled after typing
+
+        def query_side_effect(selector):
+            if selector == engagement.COMMENT_INPUT_SELECTOR:
+                return comment_input
+            elif selector == engagement.COMMENT_SUBMIT_SELECTOR:
+                return submit_button
+            return None
+
+        page.query_selector.side_effect = query_side_effect
+
+        res = engagement._perform_comment(page, "Test comment")
+        assert res == "FAILED"
+        assert comment_input.fill.called
+        assert not submit_button.click.called
