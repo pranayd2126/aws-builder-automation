@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,6 +15,14 @@ class DatabaseManager:
     def __init__(self, db_path: str, logger: logging.Logger):
         self.db_path = db_path
         self.logger = logger
+
+        # Ensure the directory for the database exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except OSError:
+                pass
 
     @contextmanager
     def get_connection(self):
@@ -223,7 +232,7 @@ class DatabaseManager:
                             INSERT OR IGNORE INTO comment_usage (comment_text, usage_count)
                             VALUES (?, 0)
                         """, (comment,))
-                    
+
                     # Delete any comments from the table that are no longer in approved_comments
                     placeholders = ','.join(['?'] * len(approved_comments))
                     conn.execute(f"""
@@ -254,10 +263,10 @@ class DatabaseManager:
                             ORDER BY usage_count ASC, last_used_at ASC
                             LIMIT 1
                         """)
-                    
+
                     row = cursor.fetchone()
                     selected_comment = row['comment_text'] if row else None
-                    
+
                     if selected_comment and not is_dry_run:
                         # Update usage tracking only for real runs
                         conn.execute("""
