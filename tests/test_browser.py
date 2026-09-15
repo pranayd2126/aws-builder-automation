@@ -32,7 +32,7 @@ def logger():
 def test_browser_launch_and_cleanup(test_config, logger):
     """Test that Chromium launches successfully and cleans up properly."""
     manager = BrowserManager(test_config, logger)
-    
+
     assert manager._playwright is None
     assert manager._context is None
     assert manager._page is None
@@ -42,7 +42,7 @@ def test_browser_launch_and_cleanup(test_config, logger):
         assert manager._context is not None
         assert manager._page is not None
         assert not manager._page.is_closed()
-        
+
     # After session exits
     assert manager._playwright is None
     assert manager._context is None
@@ -57,7 +57,7 @@ def test_authentication_required_due_to_login_url(test_config, logger):
         manager._page.goto.return_value = MagicMock()
         # Simulate being redirected to a signin page
         manager._page.url = "https://signin.example.com"
-        
+
         state = manager.check_session()
         assert state == AuthState.REQUIRED
 
@@ -69,7 +69,7 @@ def test_authentication_required_due_to_sign_in_text(test_config, logger):
         manager._page = MagicMock()
         manager._page.goto.return_value = MagicMock()
         manager._page.url = "http://example.com/mock-builder"
-        
+
         # Mock get_by_text: "Sign In" visible, others not
         def get_by_text_side_effect(text, **kwargs):
             m = MagicMock()
@@ -79,9 +79,9 @@ def test_authentication_required_due_to_sign_in_text(test_config, logger):
             else:
                 m.is_visible.return_value = False
             return m
-            
+
         manager._page.get_by_text.side_effect = get_by_text_side_effect
-        
+
         state = manager.check_session()
         assert state == AuthState.REQUIRED
 
@@ -93,7 +93,7 @@ def test_authentication_available_due_to_sign_out_text(test_config, logger):
         manager._page = MagicMock()
         manager._page.goto.return_value = MagicMock()
         manager._page.url = "http://example.com/mock-builder"
-        
+
         def get_by_text_side_effect(text, **kwargs):
             m = MagicMock()
             m.first = m
@@ -102,9 +102,9 @@ def test_authentication_available_due_to_sign_out_text(test_config, logger):
             else:
                 m.is_visible.return_value = False
             return m
-            
+
         manager._page.get_by_text.side_effect = get_by_text_side_effect
-        
+
         state = manager.check_session()
         assert state == AuthState.AVAILABLE
 
@@ -115,7 +115,7 @@ def test_navigation_failure_returns_failed(test_config, logger):
     with patch.object(manager, 'start'), patch.object(manager, 'stop'):
         manager._page = MagicMock()
         manager._page.goto.side_effect = PlaywrightError("Navigation timeout")
-        
+
         state = manager.check_session()
         assert state == AuthState.FAILED
 
@@ -126,7 +126,7 @@ def test_navigation_returns_none(test_config, logger):
     with patch.object(manager, 'start'), patch.object(manager, 'stop'):
         manager._page = MagicMock()
         manager._page.goto.return_value = None
-        
+
         state = manager.check_session()
         assert state == AuthState.FAILED
 
@@ -134,13 +134,13 @@ def test_navigation_returns_none(test_config, logger):
 def test_browser_startup_failure_handling(test_config, logger):
     """Test that a startup failure raises exception and cleans up."""
     manager = BrowserManager(test_config, logger)
-    
+
     with patch("app.browser.sync_playwright") as mock_pw:
         mock_pw.return_value.start.side_effect = Exception("Failed to start")
-        
+
         with pytest.raises(Exception, match="Failed to start"):
             manager.start()
-            
+
         assert manager._playwright is None
         assert manager._context is None
 
@@ -150,6 +150,41 @@ def test_closed_page_handled_safely(test_config, logger):
     manager = BrowserManager(test_config, logger)
     # Don't initialize page
     assert manager._page is None
-    
+
     state = manager.check_session()
     assert state == AuthState.FAILED
+
+
+def test_wait_for_manual_login_success(test_config, logger):
+    """Test wait_for_manual_login returns True on success."""
+    manager = BrowserManager(test_config, logger)
+    manager._page = MagicMock()
+
+    # Mock locator to return successfully
+    mock_locator = MagicMock()
+    manager._page.get_by_text.return_value.first = mock_locator
+
+    result = manager.wait_for_manual_login(timeout_ms=10)
+    assert result is True
+    mock_locator.wait_for.assert_called_once_with(state="visible", timeout=10)
+
+
+def test_wait_for_manual_login_timeout(test_config, logger):
+    """Test wait_for_manual_login returns False on timeout."""
+    manager = BrowserManager(test_config, logger)
+    manager._page = MagicMock()
+
+    # Mock locator to raise PlaywrightError
+    mock_locator = MagicMock()
+    mock_locator.wait_for.side_effect = PlaywrightError("Timeout")
+    manager._page.get_by_text.return_value.first = mock_locator
+
+    result = manager.wait_for_manual_login(timeout_ms=10)
+    assert result is False
+
+
+def test_wait_for_manual_login_no_page(test_config, logger):
+    """Test wait_for_manual_login returns False if no page exists."""
+    manager = BrowserManager(test_config, logger)
+    assert manager._page is None
+    assert manager.wait_for_manual_login() is False

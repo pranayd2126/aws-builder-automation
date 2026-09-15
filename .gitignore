@@ -9,4 +9,8 @@ data/*.db-journal
 data/*.db-wal
 logs/
 browser-profile/
+browser_profile/
+.auth/
+storage_state/
+*.session
 screenshots/

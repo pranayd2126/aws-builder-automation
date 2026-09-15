@@ -8,7 +8,9 @@ from dataclasses import replace
 from app import __version__
 from app.browser import BrowserManager, AuthState
 from app.config import Config, ConfigError
-from app.database import DatabaseManager
+from app.database import DatabaseManager, DatabaseError
+from app.discovery import ArticleDiscovery, DiscoveryStatus
+from app.engagement import ArticleEngagement, EngagementStatus
 from app.logger import setup_logger
 from app.lifecycle import AppLifecycle, RunPhase
 
@@ -23,6 +25,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=None,
         help="Force DRY_RUN mode (simulate without real engagement)",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Launch headed browser and wait for manual Google authentication",
     )
     parser.add_argument(
         "--version",
@@ -49,6 +56,10 @@ def main() -> int:
     # CLI --dry-run overrides config (can only force dry run ON, never off)
     if args.dry_run:
         config = replace(config, dry_run=True)
+
+    # CLI --setup forces headed browser for manual login
+    if getattr(args, "setup", False):
+        config = replace(config, browser_headless=False)
 
     # 2. Setup logger
     logger = setup_logger(config, run_id)
@@ -85,23 +96,140 @@ def main() -> int:
                 
                 if auth_state == AuthState.FAILED:
                     logger.error("Authentication check failed due to browser/network error.")
+                    db.record_run_final_status(run_id, "FAILED", "Authentication check failed")
                     lifecycle.transition(RunPhase.FAILED)
                     return 1
                 elif auth_state == AuthState.REQUIRED:
-                    logger.warning("Authentication is REQUIRED. Please run with headed mode to login.")
-                    # For this phase, we treat this as a safe exit but maybe not COMPLETED
-                    lifecycle.transition(RunPhase.FAILED)
-                    return 1
-                elif auth_state == AuthState.AVAILABLE:
+                    if getattr(args, "setup", False):
+                        logger.info("Setup mode: waiting for manual authentication...")
+                        if browser_manager.wait_for_manual_login():
+                            auth_state = AuthState.AVAILABLE
+                        else:
+                            logger.error("Setup mode: manual authentication failed or timed out.")
+                            db.record_run_final_status(run_id, "AUTHENTICATION_REQUIRED")
+                            lifecycle.transition(RunPhase.FAILED)
+                            return 1
+                    else:
+                        logger.warning("Authentication is REQUIRED. Please run with --setup to login.")
+                        db.record_run_final_status(run_id, "AUTHENTICATION_REQUIRED")
+                        lifecycle.transition(RunPhase.FAILED)
+                        return 1
+
+                if auth_state == AuthState.AVAILABLE:
                     logger.info("Authentication verified successfully.")
-                    
-                    # Normally we would go to DISCOVERY, but for Phase 4 we stop here.
-                    lifecycle.transition(RunPhase.CLEANUP)
-                    lifecycle.transition(RunPhase.COMPLETED)
-                    logger.info("Application finished successfully.")
-                    return 0
+
+                    # Phase 7 constraint: --setup must only verify/save session
+                    if getattr(args, "setup", False):
+                        logger.info("Setup complete. Authenticated session saved.")
+                        db.record_run_final_status(run_id, "SETUP_COMPLETE")
+                        lifecycle.transition(RunPhase.CLEANUP)
+                        lifecycle.transition(RunPhase.COMPLETED)
+                        return 0
+
+                    # Phase 5: Article discovery
+                    lifecycle.transition(RunPhase.DISCOVERY)
+                    discovery = ArticleDiscovery(config, db, logger)
+                    result = discovery.discover(browser_manager._page)
+
+                    if result.status == DiscoveryStatus.SELECTED:
+                        article = result.article
+                        logger.info(
+                            f"Discovery complete: SELECTED article "
+                            f"url={article.url}, title={article.title!r}"
+                        )
+                        # Associate selected article with this run
+                        try:
+                            db.select_article_for_run(run_id, article.url)
+                        except DatabaseError as e:
+                            logger.error(
+                                f"Failed to associate article with run: {e}",
+                                exc_info=True,
+                            )
+                            db.record_run_final_status(run_id, "FAILED", str(e))
+                            lifecycle.transition(RunPhase.FAILED)
+                            return 1
+
+                        # Phase 6: Article engagement
+                        lifecycle.transition(RunPhase.ENGAGEMENT)
+                        engagement = ArticleEngagement(
+                            config, db, run_id, logger
+                        )
+                        eng_result = engagement.engage(
+                            browser_manager._page, article
+                        )
+
+                        if eng_result.status == EngagementStatus.SUCCESS:
+                            logger.info("Engagement completed successfully.")
+                            db.record_run_final_status(run_id, "COMPLETED")
+                            lifecycle.transition(RunPhase.CLEANUP)
+                            lifecycle.transition(RunPhase.COMPLETED)
+                            logger.info("Application finished successfully.")
+                            return 0
+
+                        elif eng_result.status == EngagementStatus.DRY_RUN:
+                            logger.info("Engagement skipped (DRY_RUN mode).")
+                            db.record_run_final_status(run_id, "DRY_RUN")
+                            lifecycle.transition(RunPhase.CLEANUP)
+                            lifecycle.transition(RunPhase.COMPLETED)
+                            logger.info("Application finished (dry run).")
+                            return 0
+
+                        elif eng_result.status == EngagementStatus.SKIPPED:
+                            logger.info("Engagement skipped (already engaged).")
+                            db.record_run_final_status(run_id, "SKIPPED")
+                            lifecycle.transition(RunPhase.CLEANUP)
+                            lifecycle.transition(RunPhase.COMPLETED)
+                            logger.info("Application finished (skipped).")
+                            return 0
+
+                        elif eng_result.status == EngagementStatus.AUTHENTICATION_REQUIRED:
+                            logger.warning(
+                                "Engagement detected authentication required."
+                            )
+                            db.record_run_final_status(
+                                run_id, "AUTHENTICATION_REQUIRED"
+                            )
+                            lifecycle.transition(RunPhase.FAILED)
+                            return 1
+
+                        else:
+                            # FAILED
+                            logger.error(
+                                f"Engagement failed: {eng_result.error}"
+                            )
+                            db.record_run_final_status(
+                                run_id, "FAILED",
+                                eng_result.error or "Engagement failed",
+                            )
+                            lifecycle.transition(RunPhase.FAILED)
+                            return 1
+
+                    elif result.status == DiscoveryStatus.NO_NEW_ARTICLE:
+                        logger.info("Discovery complete: NO_NEW_ARTICLE.")
+                        db.record_run_final_status(run_id, "NO_NEW_ARTICLE")
+                        lifecycle.transition(RunPhase.CLEANUP)
+                        lifecycle.transition(RunPhase.COMPLETED)
+                        logger.info("Application finished — no new article to process.")
+                        return 0
+
+                    elif result.status == DiscoveryStatus.AUTHENTICATION_REQUIRED:
+                        logger.warning("Discovery detected authentication required.")
+                        db.record_run_final_status(run_id, "AUTHENTICATION_REQUIRED")
+                        lifecycle.transition(RunPhase.FAILED)
+                        return 1
+
+                    else:
+                        # FAILED or unknown
+                        logger.error(f"Discovery failed: {result.error}")
+                        db.record_run_final_status(
+                            run_id, "FAILED",
+                            result.error or "Discovery failed",
+                        )
+                        lifecycle.transition(RunPhase.FAILED)
+                        return 1
                 else:
                     logger.error(f"Unknown authentication state: {auth_state}")
+                    db.record_run_final_status(run_id, "FAILED", "Unknown auth state")
                     lifecycle.transition(RunPhase.FAILED)
                     return 1
         except Exception as e:

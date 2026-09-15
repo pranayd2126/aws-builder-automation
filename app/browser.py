@@ -159,3 +159,31 @@ class BrowserManager:
         except Exception as e:
             self.logger.error(f"Unexpected error during session check: {e}", exc_info=True)
             return AuthState.FAILED
+
+    def wait_for_manual_login(self, timeout_ms: int = 300000) -> bool:
+        """
+        Wait for the user to manually log in via the browser UI.
+        This polls the page state waiting for 'Sign Out' to become visible,
+        indicating a successful login.
+
+        Args:
+            timeout_ms: Maximum time to wait in milliseconds (default 5 minutes).
+
+        Returns:
+            True if authentication succeeds, False otherwise.
+        """
+        if not self._page:
+            return False
+
+        self.logger.info(
+            "Waiting up to 5 minutes for manual Google authentication. "
+            "Please log in using the opened browser window..."
+        )
+        try:
+            sign_out_locator = self._page.get_by_text("Sign Out", exact=False).first
+            sign_out_locator.wait_for(state="visible", timeout=timeout_ms)
+            self.logger.info("Manual authentication detected successfully!")
+            return True
+        except PlaywrightError:
+            self.logger.warning("Timeout or error waiting for manual authentication.")
+            return False
