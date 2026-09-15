@@ -220,8 +220,9 @@ class TestDryRun:
         db.record_run_start(run_id, is_dry_run=True)
         eng = ArticleEngagement(dry_config, db, run_id, logger)
 
-        page = _make_mock_page()
-        result = eng.engage(page, valid_article)
+        with patch("app.engagement.APPROVED_COMMENTS", ["Test comment"]):
+            page = _make_mock_page()
+            result = eng.engage(page, valid_article)
 
         assert result.status == EngagementStatus.DRY_RUN
 
@@ -594,7 +595,7 @@ class TestPlaywrightFailure:
         db.record_run_start(run_id, is_dry_run=False)
         eng = ArticleEngagement(test_config, db, run_id, logger)
 
-        with patch("app.engagement.APPROVED_COMMENTS", []):
+        with patch("app.engagement.APPROVED_COMMENTS", ["Test comment"]):
             page = _make_mock_page()
             # Configure the cached like button to raise on click
             page._mock_like_button.click.side_effect = PlaywrightError("Click failed")
@@ -929,8 +930,8 @@ class TestActionAtMostOnce:
 
 class TestNoApprovedComments:
 
-    def test_no_comments_skips_comment_action(self, test_config, db, run_id, logger, valid_article):
-        """Test that empty APPROVED_COMMENTS skips the comment action."""
+    def test_no_comments_aborts_engagement(self, test_config, db, run_id, logger, valid_article):
+        """Test that empty APPROVED_COMMENTS aborts the engagement without liking."""
         db.record_run_start(run_id, is_dry_run=False)
         eng = ArticleEngagement(test_config, db, run_id, logger)
 
@@ -938,9 +939,10 @@ class TestNoApprovedComments:
         page = _make_mock_page()
         result = eng.engage(page, valid_article)
 
-        assert result.comment_status == "NO_COMMENTS"
-        # Like should still be attempted
-        assert result.like_status is not None
+        assert result.status == EngagementStatus.FAILED
+        assert "No approved comments configured" in result.error
+        assert result.comment_status is None
+        assert result.like_status is None
 
 
 # ===========================================================================

@@ -195,6 +195,15 @@ class ArticleEngagement:
                 error=f"Comment selection failed: {e}",
             )
 
+        if not comment_text:
+            self.logger.warning(
+                "No approved comments configured or available. Aborting engagement."
+            )
+            return EngagementResult(
+                status=EngagementStatus.FAILED,
+                error="No approved comments configured",
+            )
+
         # Step 7: Perform comment engagement
         comment_result = self._perform_comment(page, comment_text)
 
@@ -206,15 +215,6 @@ class ArticleEngagement:
             overall_status = EngagementStatus.DRY_RUN
         elif comment_result == "SUCCESS" or like_result == "SUCCESS":
             overall_status = EngagementStatus.SUCCESS
-        elif comment_result == "NO_COMMENTS" and like_result == "SUCCESS":
-            overall_status = EngagementStatus.SUCCESS
-        elif comment_result == "NO_COMMENTS" and like_result == "ALREADY_PRESENT":
-            overall_status = EngagementStatus.SKIPPED
-        elif (
-            comment_result == "NO_COMMENTS"
-            and like_result in ("FAILED", "NOT_FOUND")
-        ):
-            overall_status = EngagementStatus.FAILED
         elif comment_result == "FAILED" and like_result == "FAILED":
             overall_status = EngagementStatus.FAILED
         else:
@@ -234,22 +234,17 @@ class ArticleEngagement:
     def _perform_comment(
         self,
         page: Page,
-        comment_text: Optional[str],
+        comment_text: str,
     ) -> str:
         """Attempt to post a comment on the article.
 
         Args:
             page: The Playwright page on the article.
-            comment_text: The approved comment to post, or None.
+            comment_text: The approved comment to post.
 
         Returns:
-            Status string: SUCCESS, FAILED, NO_COMMENTS, NOT_FOUND.
+            Status string: SUCCESS, FAILED, NOT_FOUND.
         """
-        if not comment_text:
-            self.logger.info(
-                "No approved comments available. Skipping comment action."
-            )
-            return "NO_COMMENTS"
 
         # Pre-record the comment attempt BEFORE performing the action
         # This ensures crash safety: if we crash after clicking but before
