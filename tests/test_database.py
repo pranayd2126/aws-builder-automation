@@ -158,6 +158,7 @@ def test_consecutive_comment_prevention_and_exact_strings(memory_db):
     # Simulate a run with c1
     memory_db.record_run_start("run1", is_dry_run=False)
     memory_db.record_comment_attempt("run1", c1)
+    memory_db.record_comment_result("run1", "SUCCESS")
 
     # 2. Get second comment
     c2 = memory_db.get_next_comment(APPROVED_COMMENTS, is_dry_run=False)
@@ -167,6 +168,7 @@ def test_consecutive_comment_prevention_and_exact_strings(memory_db):
     # Simulate a run with c2
     memory_db.record_run_start("run2", is_dry_run=False)
     memory_db.record_comment_attempt("run2", c2)
+    memory_db.record_comment_result("run2", "SUCCESS")
 
     # 3. Get third comment (if 3 or more exist)
     if len(APPROVED_COMMENTS) >= 3:

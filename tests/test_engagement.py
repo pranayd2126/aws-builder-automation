@@ -162,6 +162,20 @@ def _make_mock_page(
 
     page.query_selector.side_effect = query_selector_side_effect
 
+    def locator_side_effect(selector):
+        mock_loc = MagicMock()
+        found = query_selector_side_effect(selector)
+        if found:
+            mock_loc.first = found
+        else:
+            not_found_mock = MagicMock()
+            from playwright.sync_api import Error as PlaywrightError
+            not_found_mock.wait_for.side_effect = PlaywrightError("Timeout")
+            mock_loc.first = not_found_mock
+        return mock_loc
+
+    page.locator.side_effect = locator_side_effect
+
     # Store cached elements as attributes for test access
     page._mock_comment_input = _comment_input
     page._mock_submit_button = _submit_button
@@ -1068,6 +1082,12 @@ class TestCommentSubmitLogic:
 
         page.query_selector.side_effect = query_side_effect
 
+        def locator_side_effect(selector):
+            mock_loc = MagicMock()
+            mock_loc.first = query_side_effect(selector)
+            return mock_loc
+        page.locator.side_effect = locator_side_effect
+
         res = engagement._perform_comment(page, "Test comment")
         assert res == "SUCCESS"
         assert comment_input.fill.called
@@ -1093,6 +1113,12 @@ class TestCommentSubmitLogic:
             return None
 
         page.query_selector.side_effect = query_side_effect
+
+        def locator_side_effect(selector):
+            mock_loc = MagicMock()
+            mock_loc.first = query_side_effect(selector)
+            return mock_loc
+        page.locator.side_effect = locator_side_effect
 
         res = engagement._perform_comment(page, "Test comment")
         assert res == "FAILED"

@@ -177,6 +177,17 @@ class DatabaseManager:
                         UPDATE runs SET comment_status = ?, error_diagnostics = COALESCE(error_diagnostics || '; ', '') || ?
                         WHERE run_id = ?
                     """, (status, error_diagnostics or '', run_id))
+
+                    if status == 'SUCCESS':
+                        # Look up the comment text for this run
+                        cursor = conn.execute("SELECT comment_text, is_dry_run FROM runs WHERE run_id = ?", (run_id,))
+                        row = cursor.fetchone()
+                        if row and row['comment_text'] and not row['is_dry_run']:
+                            conn.execute("""
+                                UPDATE comment_usage
+                                SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP
+                                WHERE comment_text = ?
+                            """, (row['comment_text'],))
         except sqlite3.Error as e:
             self.logger.error(f"Failed to record comment result for run {run_id}: {e}", exc_info=True)
             raise DatabaseError(f"Failed to record comment result: {e}") from e
@@ -271,14 +282,6 @@ class DatabaseManager:
 
                     row = cursor.fetchone()
                     selected_comment = row['comment_text'] if row else None
-
-                    if selected_comment and not is_dry_run:
-                        # Update usage tracking only for real runs
-                        conn.execute("""
-                            UPDATE comment_usage
-                            SET usage_count = usage_count + 1, last_used_at = CURRENT_TIMESTAMP
-                            WHERE comment_text = ?
-                        """, (selected_comment,))
 
                     return selected_comment
         except sqlite3.Error as e:

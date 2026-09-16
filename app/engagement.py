@@ -264,16 +264,19 @@ class ArticleEngagement:
 
         # Find the comment input
         try:
-            comment_input = page.query_selector(self.COMMENT_INPUT_SELECTOR)
-            if not comment_input:
-                self.logger.warning("Comment input not found on page.")
-                self._record_comment_result("NOT_FOUND", "Comment input not found")
-                return "NOT_FOUND"
+            # Scroll down repeatedly to trigger lazy-loading of the comment section
+            for _ in range(5):
+                page.mouse.wheel(0, 1000)
+                page.wait_for_timeout(500)
 
-            # Check if the input is visible and enabled
-            if not comment_input.is_visible():
-                self.logger.warning("Comment input is not visible.")
-                self._record_comment_result("NOT_FOUND", "Comment input not visible")
+            comment_input = page.locator(self.COMMENT_INPUT_SELECTOR).first
+
+            try:
+                # wait_for is needed because the comment editor might be rendered asynchronously
+                comment_input.wait_for(state="visible", timeout=self.config.selector_timeout_ms)
+            except PlaywrightError:
+                self.logger.warning("Comment input not found or not visible on page.")
+                self._record_comment_result("NOT_FOUND", "Comment input not found")
                 return "NOT_FOUND"
 
             if not comment_input.is_enabled():
@@ -315,7 +318,7 @@ class ArticleEngagement:
                 self.logger.warning("Comment submit button is missing or disabled after typing.")
                 self._record_comment_result("FAILED", "Submit button disabled after typing")
                 return "FAILED"
-            
+
             submit_button.click()
             self.logger.info("Comment submitted.")
 
