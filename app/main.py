@@ -84,6 +84,7 @@ def main() -> int:
         # Phase 3 integration: DB initialization
         db = DatabaseManager(config.database_path, logger)
         db.init_db()
+        db.record_run_start(run_id, config.dry_run)
 
         # Phase 4 integration: Browser
         browser_manager = BrowserManager(config, logger)

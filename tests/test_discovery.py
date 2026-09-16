@@ -216,6 +216,9 @@ class TestURLValidation:
     def test_valid_community_aws_articles(self):
         assert validate_article_url("https://community.aws/articles/my-article") is True
 
+    def test_valid_builder_aws_com_host(self):
+        assert validate_article_url("https://builder.aws.com/content/my-article") is True
+
     def test_valid_www_subdomain(self):
         assert validate_article_url("https://www.community.aws/posts/my-article") is True
 
@@ -724,13 +727,13 @@ class TestListingURL:
 
     def test_listing_url_built_correctly(self, discovery):
         url = discovery._build_listing_url()
-        assert url == "https://community.aws/posts"
+        assert url == "https://community.aws/"
 
     def test_listing_url_strips_trailing_slash(self, test_config, db, logger):
         from dataclasses import replace
         config = replace(test_config, builder_center_url="https://community.aws/")
         disc = ArticleDiscovery(config, db, logger)
-        assert disc._build_listing_url() == "https://community.aws/posts"
+        assert disc._build_listing_url() == "https://community.aws/"
 
 
 # ===========================================================================

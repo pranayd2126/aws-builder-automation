@@ -214,3 +214,63 @@ def test_foreign_key_constraint(memory_db):
     with pytest.raises(DatabaseError):
         # Attempt to link to non-existent article
         memory_db.select_article_for_run("run1", "https://doesnotexist.com")
+
+def test_comment_not_found_like_success_blocks(memory_db):
+    """Test real run with comment NOT_FOUND + like SUCCESS blocks."""
+    url = "https://example.com/partial1"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=False)
+    memory_db.select_article_for_run("run1", url)
+    memory_db.record_comment_result("run1", "NOT_FOUND")
+    memory_db.record_like_result("run1", "SUCCESS")
+    assert memory_db.is_article_eligible(url) is False
+
+def test_comment_failed_like_success_blocks(memory_db):
+    """Test real run with comment FAILED + like SUCCESS blocks."""
+    url = "https://example.com/partial2"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=False)
+    memory_db.select_article_for_run("run1", url)
+    memory_db.record_comment_result("run1", "FAILED")
+    memory_db.record_like_result("run1", "SUCCESS")
+    assert memory_db.is_article_eligible(url) is False
+
+def test_comment_success_like_success_blocks(memory_db):
+    """Test real run with comment SUCCESS + like SUCCESS blocks."""
+    url = "https://example.com/success"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=False)
+    memory_db.select_article_for_run("run1", url)
+    memory_db.record_comment_result("run1", "SUCCESS")
+    memory_db.record_like_result("run1", "SUCCESS")
+    assert memory_db.is_article_eligible(url) is False
+
+def test_like_success_no_comment_blocks(memory_db):
+    """Test real run with like SUCCESS and no comment result blocks."""
+    url = "https://example.com/like_only"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=False)
+    memory_db.select_article_for_run("run1", url)
+    # No comment result
+    memory_db.record_like_result("run1", "SUCCESS")
+    assert memory_db.is_article_eligible(url) is False
+
+def test_dry_run_does_not_block(memory_db):
+    """Test dry-run engagement records do not block future real execution."""
+    url = "https://example.com/dry"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=True)
+    memory_db.select_article_for_run("run1", url)
+    memory_db.record_comment_result("run1", "SUCCESS")
+    memory_db.record_like_result("run1", "SUCCESS")
+    assert memory_db.is_article_eligible(url) is True
+
+def test_existing_attempted_behavior_blocks(memory_db):
+    """Test existing ATTEMPTED behavior still blocks rerun."""
+    url = "https://example.com/attempted"
+    memory_db.save_article(url, "Test")
+    memory_db.record_run_start("run1", is_dry_run=False)
+    memory_db.select_article_for_run("run1", url)
+    memory_db.record_comment_attempt("run1", "comment")
+    # Crashes here, so it remains ATTEMPTED
+    assert memory_db.is_article_eligible(url) is False

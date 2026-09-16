@@ -119,6 +119,38 @@ def test_authentication_available_due_to_sign_out_text(test_config, logger):
         assert state == AuthState.AVAILABLE
 
 
+def test_authentication_available_due_to_notifications_label(test_config, logger):
+    """Test AuthState.AVAILABLE is returned when Notifications label is present."""
+    manager = BrowserManager(test_config, logger)
+    with patch.object(manager, 'start'), patch.object(manager, 'stop'):
+        manager._page = MagicMock()
+        manager._page.goto.return_value = MagicMock()
+        manager._page.url = "http://example.com/mock-builder"
+
+        def get_by_text_side_effect(text, **kwargs):
+            m = MagicMock()
+            m.first = m
+            m.is_visible.return_value = False
+            m.count.return_value = 0
+            return m
+
+        def locator_side_effect(selector, **kwargs):
+            m = MagicMock()
+            m.first = m
+            # Return count > 0 for Notifications
+            if selector == '[aria-label="Notifications" i]':
+                m.count.return_value = 1
+            else:
+                m.count.return_value = 0
+            return m
+
+        manager._page.get_by_text.side_effect = get_by_text_side_effect
+        manager._page.locator.side_effect = locator_side_effect
+
+        state = manager.check_session()
+        assert state == AuthState.AVAILABLE
+
+
 def test_navigation_failure_returns_failed(test_config, logger):
     """Test AuthState.FAILED is returned on navigation exception."""
     manager = BrowserManager(test_config, logger)
@@ -196,3 +228,23 @@ def test_wait_for_manual_login_no_page(test_config, logger):
     manager = BrowserManager(test_config, logger)
     assert manager._page is None
     assert manager.wait_for_manual_login() is False
+
+from app.browser import is_auth_redirect_url
+
+def test_is_auth_redirect_url_genuine_auth():
+    """A. A genuine authentication URL/path is detected."""
+    assert is_auth_redirect_url("https://signin.aws.amazon.com/signin")
+    assert is_auth_redirect_url("https://login.amazon.com/")
+
+def test_is_auth_redirect_url_normal_article():
+    """B. A normal article URL containing login in slug is NOT detected."""
+    assert not is_auth_redirect_url("https://community.aws/articles/authenticate-to-aws-cli-using-aws-login-without-iam-access-keys")
+
+def test_is_auth_redirect_url_signin_in_slug():
+    """C. An article URL containing signin in its slug is NOT detected."""
+    assert not is_auth_redirect_url("https://community.aws/articles/how-to-signin-securely")
+
+def test_is_auth_redirect_url_query_params():
+    """D. A genuine authentication redirect with query parameters/fragments is still detected."""
+    assert is_auth_redirect_url("https://signin.aws.amazon.com/signin?redirect=xyz#fragment")
+    assert is_auth_redirect_url("https://example.com/login?next=/home")

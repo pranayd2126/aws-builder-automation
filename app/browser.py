@@ -3,10 +3,23 @@ import os
 from contextlib import contextmanager
 from enum import Enum
 from typing import Generator, Optional
+from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, Playwright, BrowserContext, Page, Error as PlaywrightError
 
 from app.config import Config
+
+
+def is_auth_redirect_url(url: str) -> bool:
+    """Check if the given URL is an authentication redirect."""
+    url_str = str(url).lower()
+    parsed = urlparse(url_str)
+    if "signin" in parsed.netloc or "login" in parsed.netloc:
+        return True
+    path_parts = [p for p in parsed.path.strip('/').split('/') if p]
+    if "signin" in path_parts or "login" in path_parts:
+        return True
+    return False
 
 
 class AuthState(str, Enum):
@@ -105,7 +118,7 @@ class BrowserManager:
         try:
             current_url = self._page.url.lower()
             # 1. Obvious sign-in pages mean not authenticated
-            if "signin" in current_url or "login" in current_url:
+            if is_auth_redirect_url(current_url):
                 return False
 
             # 2. Check for explicit unauthenticated signals (visible)
@@ -129,6 +142,8 @@ class BrowserManager:
                 self._page.locator('[aria-label*="profile" i]').first,
                 self._page.locator('[aria-label*="account" i]').first,
                 self._page.locator('[aria-label*="user menu" i]').first,
+                self._page.locator('[aria-label="Notifications" i]').first,
+                self._page.locator('[aria-label="Settings" i]').first,
             ]
 
             for indicator in positive_indicators:

@@ -15,6 +15,7 @@ from playwright.sync_api import Page, Error as PlaywrightError
 
 from app.config import Config
 from app.database import DatabaseManager, DatabaseError
+from app.browser import is_auth_redirect_url
 
 
 class DiscoveryStatus(str, Enum):
@@ -53,6 +54,7 @@ class DiscoveryResult:
 _BUILDER_CENTER_HOSTS = frozenset({
     "community.aws",
     "www.community.aws",
+    "builder.aws.com",
 })
 
 _BUILDER_CENTER_PATH_PATTERN = re.compile(
@@ -194,7 +196,7 @@ class ArticleDiscovery:
 
     # CSS selectors for the article listing — kept as class-level constants
     # so tests can verify them without hard-coding selectors elsewhere.
-    LISTING_PATH = "/posts"
+    LISTING_PATH = "/"
     ARTICLE_LINK_SELECTOR = 'a[href*="/posts/"], a[href*="/content/"], a[href*="/articles/"]'
 
     def __init__(
@@ -256,7 +258,7 @@ class ArticleDiscovery:
 
         # Step 2: Check for authentication redirect
         current_url = page.url.lower()
-        if "signin" in current_url or "login" in current_url:
+        if is_auth_redirect_url(current_url):
             self.logger.info("Redirected to login page during discovery. Authentication required.")
             return DiscoveryResult(
                 status=DiscoveryStatus.AUTHENTICATION_REQUIRED,

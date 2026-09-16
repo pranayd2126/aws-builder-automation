@@ -124,7 +124,12 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.execute("""
                     SELECT 1 FROM runs
-                    WHERE article_url = ? AND is_dry_run = 0 AND comment_status IN ('ATTEMPTED', 'SUCCESS', 'FAILED')
+                    WHERE article_url = ?
+                      AND is_dry_run = 0
+                      AND (
+                          comment_status IN ('ATTEMPTED', 'SUCCESS', 'FAILED', 'NOT_FOUND')
+                          OR like_status IN ('ATTEMPTED', 'SUCCESS', 'FAILED', 'NOT_FOUND', 'ALREADY_PRESENT')
+                      )
                     LIMIT 1
                 """, (url,))
                 row = cursor.fetchone()

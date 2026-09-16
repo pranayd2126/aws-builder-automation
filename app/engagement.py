@@ -16,6 +16,7 @@ from playwright.sync_api import Page, Error as PlaywrightError
 from app.config import Config, APPROVED_COMMENTS
 from app.database import DatabaseManager, DatabaseError
 from app.discovery import ArticleCandidate, validate_article_url
+from app.browser import is_auth_redirect_url
 
 
 class EngagementStatus(str, Enum):
@@ -172,7 +173,7 @@ class ArticleEngagement:
 
         # Step 5: Check for authentication redirect
         current_url = page.url.lower()
-        if "signin" in current_url or "login" in current_url:
+        if is_auth_redirect_url(current_url):
             self.logger.info(
                 "Redirected to login page during engagement. "
                 "Authentication required."
